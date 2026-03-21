@@ -30,6 +30,8 @@ class Portfolio:
     # `holdings` maps each symbol to the number of shares currently owned.
     # `default_factory=dict` avoids sharing the same dictionary across instances.
     holdings: dict[str, int] = field(default_factory=dict)
+    # `transactions` stores a simple audit trail of executed trades.
+    transactions: list[dict[str, str | int | float]] = field(default_factory=list)
 
     # `get_position` centralizes how the rest of the code reads a holding.
     # Returning `0` for missing symbols keeps callers simple.
@@ -55,6 +57,23 @@ class Portfolio:
         else:
             # Any positive result is stored back into the holdings map.
             self.holdings[symbol] = new_quantity
+
+    # `record_transaction` appends one executed trade to the audit log.
+    def record_transaction(self, transaction: dict[str, str | int | float]) -> None:
+        # Store a shallow copy so later callers do not mutate the saved record.
+        self.transactions.append(dict(transaction))
+
+    # `get_total_value` combines cash with the marked-to-market value of holdings.
+    def get_total_value(self, current_prices: dict[str, float]) -> float:
+        # Start with the cash balance because it already contributes to total value.
+        total_value = self.cash
+
+        # Add each position valued at the latest provided market price.
+        for symbol, quantity in self.holdings.items():
+            total_value += quantity * current_prices.get(symbol, 0.0)
+
+        # Return the combined portfolio valuation.
+        return total_value
 
 
 # `TradeAction` is the agent's proposed next step.

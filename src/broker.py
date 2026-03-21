@@ -1,29 +1,40 @@
-"""Mock execution layer for the trading simulation.
-
-The broker is responsible for turning an approved trade decision into changes
-to cash and holdings. In a real system this would talk to an exchange or API.
-"""
-
-# Import the shared portfolio and trade models used by the broker methods.
-from models import Portfolio, TradeAction
+from models import TradeAction, Portfolio
 
 
-# `MockBroker` simulates fills locally without any external dependency.
 class MockBroker:
-    # `execute_trade` mutates the portfolio in place based on the trade type.
+    """
+    Executes approved trades against a simulated portfolio.
+    """
+
     def execute_trade(self, action: TradeAction, portfolio: Portfolio) -> None:
-        # Handle buys by reducing cash and increasing the share count.
-        if action.action_type == "BUY":
-            # Deduct the total cost of the purchase from available cash.
-            portfolio.cash -= action.price * action.quantity
-            # Increase the owned position by the number of purchased shares.
-            portfolio.update_position(action.symbol, action.quantity)
-            # Return early because the buy path is complete.
+        if action.action_type == "HOLD":
             return
 
-        # Handle sells by increasing cash and reducing the share count.
-        if action.action_type == "SELL":
-            # Add the sale proceeds back to cash.
-            portfolio.cash += action.price * action.quantity
-            # Reduce the position by the number of sold shares.
+        if action.action_type == "BUY":
+            total_cost = action.quantity * action.price
+            portfolio.cash -= total_cost
+            portfolio.update_position(action.symbol, action.quantity)
+            
+            portfolio.record_transaction({
+                "type": "BUY",
+                "symbol": action.symbol,
+                "quantity": action.quantity,
+                "price": action.price,
+                "value": total_cost
+            })
+
+        elif action.action_type == "SELL":
+            total_value = action.quantity * action.price
+            portfolio.cash += total_value
             portfolio.update_position(action.symbol, -action.quantity)
+            
+            portfolio.record_transaction({
+                "type": "SELL",
+                "symbol": action.symbol,
+                "quantity": action.quantity,
+                "price": action.price,
+                "value": total_value
+            })
+
+        else:
+            raise ValueError(f"Unsupported action type: {action.action_type}")
