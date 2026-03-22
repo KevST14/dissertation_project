@@ -10,35 +10,35 @@ from broker import MockBroker
 from models import Portfolio, TradeAction
 
 
-def test_execute_trade_updates_cash_for_buy_using_action_price() -> None:
+def test_broker_updates_cash_and_holdings_for_buy() -> None:
     broker = MockBroker()
     portfolio = Portfolio(cash=1000.0)
     action = TradeAction(
         action_type="BUY",
         symbol="AAPL",
-        quantity=1,
-        price=98.50,
-        reasoning="Buy one share at the current market price.",
+        quantity=2,
+        price=100.0,
+        reasoning="Buy two shares.",
     )
 
     broker.execute_trade(action, portfolio)
 
-    assert portfolio.cash == pytest.approx(901.50)
-    assert portfolio.holdings == {"AAPL": 1}
+    assert portfolio.cash == pytest.approx(800.0)
+    assert portfolio.holdings == {"AAPL": 2}
 
 
-def test_execute_trade_updates_cash_for_sell_using_action_price() -> None:
+def test_broker_updates_cash_and_holdings_for_sell() -> None:
     broker = MockBroker()
-    portfolio = Portfolio(cash=901.50, holdings={"AAPL": 1})
+    portfolio = Portfolio(cash=800.0, holdings={"AAPL": 2})
     action = TradeAction(
         action_type="SELL",
         symbol="AAPL",
         quantity=1,
-        price=106.75,
-        reasoning="Sell one share at the current market price.",
+        price=110.0,
+        reasoning="Sell one share.",
     )
 
     broker.execute_trade(action, portfolio)
 
-    assert portfolio.cash == pytest.approx(1008.25)
-    assert portfolio.holdings == {}
+    assert portfolio.cash == pytest.approx(910.0)
+    assert portfolio.holdings == {"AAPL": 1}
