@@ -21,6 +21,7 @@ class SafetyValidator:
         if action.quantity < 0:
             return SafetyCheckResult(
                 approved=False,
+                layer="safety_validator",
                 reason="Trade quantity cannot be negative.",
             )
 
@@ -28,6 +29,7 @@ class SafetyValidator:
         if action.quantity > self.max_trade_quantity:
             return SafetyCheckResult(
                 approved=False,
+                layer="safety_validator",
                 reason="Trade quantity exceeds the configured safety limit.",
             )
 
@@ -35,6 +37,7 @@ class SafetyValidator:
         if action.action_type == "HOLD":
             return SafetyCheckResult(
                 approved=True,
+                layer="safety_validator",
                 reason="No trade requested.",
             )
 
@@ -42,6 +45,7 @@ class SafetyValidator:
         if action.quantity == 0:
             return SafetyCheckResult(
                 approved=False,
+                layer="safety_validator",
                 reason="Trade quantity must be greater than zero.",
             )
 
@@ -53,11 +57,13 @@ class SafetyValidator:
             if available < action.quantity:
                 return SafetyCheckResult(
                     approved=False,
+                    layer="safety_validator",
                     reason="Insufficient holdings for the requested sell order.",
                 )
 
         # If none of the blocking rules fired, the trade is safe to execute.
         return SafetyCheckResult(
             approved=True,
+            layer="safety_validator",
             reason="Trade satisfies safety checks.",
         )
