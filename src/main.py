@@ -10,10 +10,12 @@ from models import Portfolio
 from market import get_mock_market_data
 # Import the simple rule-based trading agent.
 from agent import SimpleTradingAgent
-# Import the component that blocks unsafe trade requests.
-from safety import SafetyValidator
 # Import the mock broker that applies approved trades to the portfolio.
 from broker import MockBroker
+from policy_validator import PolicyValidator
+from risk_monitor import RiskMonitor
+from permission_guard import PermissionGuard
+from safety_controller import SafetyController
 
 portfolio_values = []
 
@@ -35,7 +37,14 @@ def main() -> None:
     # Create the agent that will propose trades for each market state.
     agent = SimpleTradingAgent()
     # Configure the safety layer with a maximum allowed trade size.
-    safety_validator = SafetyValidator(max_trade_quantity=5)
+    policy_validator = PolicyValidator(max_trade_quantity=5)
+    risk_monitor = RiskMonitor(max_position_fraction=0.30)
+    permission_guard = PermissionGuard(allowed_actions={"BUY", "SELL", "HOLD"})
+    safety_controller = SafetyController(
+        policy_validator=policy_validator,
+        risk_monitor=risk_monitor,
+        permission_guard=permission_guard
+    )
     # Create the broker that will execute any approved trades.
     broker = MockBroker()
 
@@ -69,11 +78,12 @@ def main() -> None:
         print(f"Reasoning: {proposed_action.reasoning}")
 
         # Run the proposed trade through the safety guardrails.
-        safety_result = safety_validator.validate(proposed_action, portfolio)
+        safety_result = safety_controller.validate(proposed_action, portfolio)
         # Show whether the safety layer approved or blocked the action.
         print(f"Safety Check: {'APPROVED' if safety_result.approved else 'BLOCKED'}")
         # Print the explanation for the safety outcome.
-        print(f"Safety Reason: {safety_result.reason}")
+        print(f"Safety Layer: {safety_result.layer}")
+        print(f"Safety Reason: {safety_result.reason}") 
 
         # Only execute the trade when the safety layer approves it.
         if safety_result.approved:

@@ -96,5 +96,7 @@ class TradeAction:
 class SafetyCheckResult:
     # `approved` is `True` when the broker is allowed to execute the trade.
     approved: bool
+    # `layer` identifies which safety component produced the decision.
+    layer: str
     # `reason` explains why the action was approved or blocked.
     reason: str
