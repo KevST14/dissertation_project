@@ -4,14 +4,13 @@ This file combines the market feed, agent, safety layer, broker, and
 evaluation utilities into one executable script.
 
 It prints state transitions to the terminal so the simulation is easy to
-inspect, then outputs summary statistics and a simple portfolio value chart
-for analysis.
+inspect, then outputs performance metrics and dissertation-friendly plots.
 """
 
-# Standard library import used for safe directory creation when saving plots.
 from pathlib import Path
+from collections import Counter
+import math
 
-# Third-party plotting library for dissertation-friendly visual output.
 import matplotlib.pyplot as plt
 
 # Import the portfolio model used to hold account state.
@@ -23,32 +22,62 @@ from agent import SimpleTradingAgent
 # Import the mock broker that applies approved trades to the portfolio.
 from broker import MockBroker
 
-# Import safety system components.
+# Safety system components.
 from policy_validator import PolicyValidator
 from risk_monitor import RiskMonitor
 from permission_guard import PermissionGuard
 from safety_controller import SafetyController
 
-# Import experiment runner for adversarial testing.
+# Experiment runner.
 from experiments import run_all_scenarios
 
-# Stores total portfolio value at each step for later reporting and plotting.
+
+# Global tracking containers used for reporting and plotting.
 portfolio_values = []
-# Stores timestamps so the value series can be labelled clearly.
 portfolio_timestamps = []
+step_returns = []
+action_counts = Counter()
+safety_counts = Counter()
+blocked_by_layer_counts = Counter()
 
 
 # `print_portfolio` centralizes portfolio formatting so the output stays consistent.
 def print_portfolio(portfolio: Portfolio) -> None:
-    # Show cash with two decimal places to resemble a currency amount.
     print(f"Cash: {portfolio.cash:.2f}")
-    # Print the holdings dictionary so we can see owned symbols and share counts.
     print(f"Holdings: {portfolio.holdings}")
+
+
+# `compute_max_drawdown` measures the worst peak-to-trough decline.
+def compute_max_drawdown(values: list[float]) -> float:
+    if not values:
+        return 0.0
+
+    peak = values[0]
+    max_drawdown = 0.0
+
+    for value in values:
+        if value > peak:
+            peak = value
+
+        if peak > 0:
+            drawdown = (peak - value) / peak
+            max_drawdown = max(max_drawdown, drawdown)
+
+    return max_drawdown * 100
+
+
+# `compute_volatility` estimates the variability of step returns.
+def compute_volatility(returns: list[float]) -> float:
+    if len(returns) < 2:
+        return 0.0
+
+    mean_return = sum(returns) / len(returns)
+    variance = sum((r - mean_return) ** 2 for r in returns) / len(returns)
+    return math.sqrt(variance) * 100
 
 
 # `print_summary_metrics` reports final performance indicators.
 def print_summary_metrics(portfolio: Portfolio) -> None:
-    # If no values were recorded, there is nothing meaningful to summarise.
     if not portfolio_values:
         print("\nNo portfolio values were recorded.")
         return
@@ -61,6 +90,8 @@ def print_summary_metrics(portfolio: Portfolio) -> None:
     percentage_return = (
         (absolute_return / initial_value) * 100 if initial_value != 0 else 0.0
     )
+    max_drawdown = compute_max_drawdown(portfolio_values)
+    volatility = compute_volatility(step_returns)
 
     print("\n=== Performance Summary ===")
     print(f"Initial Portfolio Value: {initial_value:.2f}")
@@ -69,19 +100,29 @@ def print_summary_metrics(portfolio: Portfolio) -> None:
     print(f"Percentage Return: {percentage_return:.2f}%")
     print(f"Maximum Portfolio Value: {max_value:.2f}")
     print(f"Minimum Portfolio Value: {min_value:.2f}")
+    print(f"Max Drawdown: {max_drawdown:.2f}%")
+    print(f"Step Return Volatility: {volatility:.2f}%")
     print(f"Transactions Recorded: {len(portfolio.transaction_history)}")
 
+    print("\n=== Action Summary ===")
+    print(f"BUY decisions: {action_counts.get('BUY', 0)}")
+    print(f"SELL decisions: {action_counts.get('SELL', 0)}")
+    print(f"HOLD decisions: {action_counts.get('HOLD', 0)}")
 
-# `plot_portfolio_value` creates a simple line chart of portfolio value over time.
-def plot_portfolio_value() -> None:
-    # Skip plotting if no values are available.
+    print("\n=== Safety Summary ===")
+    print(f"Approved actions: {safety_counts.get('APPROVED', 0)}")
+    print(f"Blocked actions: {safety_counts.get('BLOCKED', 0)}")
+
+    if blocked_by_layer_counts:
+        print("Blocked by layer:")
+        for layer, count in blocked_by_layer_counts.items():
+            print(f"  {layer}: {count}")
+
+
+# `save_portfolio_value_plot` creates a line chart of portfolio value over time.
+def save_portfolio_value_plot(output_dir: Path) -> None:
     if not portfolio_values:
-        print("No portfolio values available to plot.")
         return
-
-    # Create output directory if it does not already exist.
-    output_dir = Path("outputs")
-    output_dir.mkdir(exist_ok=True)
 
     plt.figure(figsize=(10, 5))
     plt.plot(portfolio_timestamps, portfolio_values, marker="o")
@@ -90,24 +131,86 @@ def plot_portfolio_value() -> None:
     plt.ylabel("Portfolio Value")
     plt.xticks(rotation=45)
     plt.tight_layout()
-
-    output_path = output_dir / "portfolio_value.png"
-    plt.savefig(output_path)
+    plt.savefig(output_dir / "portfolio_value.png")
     plt.close()
 
-    print(f"\nPortfolio value chart saved to: {output_path}")
+
+# `save_step_returns_plot` creates a line chart of per-step returns.
+def save_step_returns_plot(output_dir: Path) -> None:
+    if not step_returns:
+        return
+
+    step_labels = list(range(1, len(step_returns) + 1))
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(step_labels, step_returns, marker="o")
+    plt.title("Step Returns Over Time")
+    plt.xlabel("Step")
+    plt.ylabel("Return")
+    plt.tight_layout()
+    plt.savefig(output_dir / "step_returns.png")
+    plt.close()
+
+
+# `save_action_distribution_plot` visualizes the frequency of agent actions.
+def save_action_distribution_plot(output_dir: Path) -> None:
+    if not action_counts:
+        return
+
+    labels = list(action_counts.keys())
+    values = list(action_counts.values())
+
+    plt.figure(figsize=(8, 5))
+    plt.bar(labels, values)
+    plt.title("Agent Action Distribution")
+    plt.xlabel("Action Type")
+    plt.ylabel("Count")
+    plt.tight_layout()
+    plt.savefig(output_dir / "action_distribution.png")
+    plt.close()
+
+
+# `save_safety_outcomes_plot` visualizes approved vs blocked actions.
+def save_safety_outcomes_plot(output_dir: Path) -> None:
+    if not safety_counts:
+        return
+
+    labels = list(safety_counts.keys())
+    values = list(safety_counts.values())
+
+    plt.figure(figsize=(8, 5))
+    plt.bar(labels, values)
+    plt.title("Safety Outcomes")
+    plt.xlabel("Outcome")
+    plt.ylabel("Count")
+    plt.tight_layout()
+    plt.savefig(output_dir / "safety_outcomes.png")
+    plt.close()
+
+
+# `save_all_plots` writes all available visual outputs to the outputs folder.
+def save_all_plots() -> None:
+    output_dir = Path("outputs")
+    output_dir.mkdir(exist_ok=True)
+
+    save_portfolio_value_plot(output_dir)
+    save_step_returns_plot(output_dir)
+    save_action_distribution_plot(output_dir)
+    save_safety_outcomes_plot(output_dir)
+
+    print("\nSaved plots:")
+    print(f"- {output_dir / 'portfolio_value.png'}")
+    print(f"- {output_dir / 'step_returns.png'}")
+    print(f"- {output_dir / 'action_distribution.png'}")
+    print(f"- {output_dir / 'safety_outcomes.png'}")
 
 
 # `main` performs one full simulation run from setup through completion.
 def main() -> None:
-    # Start with a portfolio that has cash but no positions.
     portfolio = Portfolio(cash=1000.0)
-    # Load the mock market timeline that the loop will iterate over.
     market_data = get_mock_market_data()
-    # Create the agent that will propose trades for each market state.
     agent = SimpleTradingAgent()
 
-    # Configure the safety architecture.
     policy_validator = PolicyValidator(max_trade_quantity=5)
     risk_monitor = RiskMonitor(max_position_fraction=0.30)
     permission_guard = PermissionGuard(allowed_actions={"BUY", "SELL", "HOLD"})
@@ -117,91 +220,89 @@ def main() -> None:
         permission_guard=permission_guard,
     )
 
-    # Create the broker that will execute any approved trades.
     broker = MockBroker()
 
-    # Clear any previous run values.
     portfolio_values.clear()
     portfolio_timestamps.clear()
+    step_returns.clear()
+    action_counts.clear()
+    safety_counts.clear()
+    blocked_by_layer_counts.clear()
 
-    # Announce the start of the run so terminal output has a clear boundary.
     print("=== Starting Simulation ===")
-    # Print the initial account state before any trades occur.
     print_portfolio(portfolio)
-    # Add a blank line to separate setup output from the first market tick.
     print()
 
-    # Process each market observation in chronological order.
+    previous_total_value = portfolio.cash
+
     for step, state in enumerate(market_data, start=1):
-        # Show which step and market event is currently being evaluated.
         print(f"Step: {step}")
         print(f"Timestamp: {state.timestamp}")
-        # Show the asset and price the agent is about to react to.
         print(f"Market: {state.symbol} @ {state.price:.2f}")
 
-        # Ask the agent to produce a proposed action for this market state.
         proposed_action = agent.decide(state, portfolio)
+        action_counts[proposed_action.action_type] += 1
 
-        # Print the core trade decision in a compact single-line format.
         print(
             f"Agent Decision: {proposed_action.action_type} "
             f"{proposed_action.quantity} {proposed_action.symbol}"
         )
-        # Print the price attached to the action so it can be compared to the market tick.
         print(f"Action Price: {proposed_action.price:.2f}")
-        # Print the human-readable explanation returned by the agent.
         print(f"Reasoning: {proposed_action.reasoning}")
 
-        # Run the proposed trade through the safety guardrails.
         safety_result = safety_controller.validate(proposed_action, portfolio)
 
-        # Show whether the safety layer approved or blocked the action.
-        print(f"Safety Check: {'APPROVED' if safety_result.approved else 'BLOCKED'}")
-        # Print the layer responsible for the safety decision.
+        safety_label = "APPROVED" if safety_result.approved else "BLOCKED"
+        safety_counts[safety_label] += 1
+
+        if not safety_result.approved:
+            blocked_by_layer_counts[safety_result.layer] += 1
+
+        print(f"Safety Check: {safety_label}")
         print(f"Safety Layer: {safety_result.layer}")
-        # Print the explanation for the safety outcome.
         print(f"Safety Reason: {safety_result.reason}")
 
-        # Only execute the trade when the safety layer approves it.
         if safety_result.approved:
             broker.execute_trade(proposed_action, portfolio)
             print("Execution: Trade processed.")
         else:
             print("Execution: Trade blocked.")
 
-        # Track the portfolio value after this step using the latest market price.
         current_prices = {state.symbol: state.price}
         total_value = portfolio.get_total_value(current_prices)
         portfolio_values.append(total_value)
         portfolio_timestamps.append(state.timestamp)
 
-        # Print the traced prices and resulting cash to verify execution correctness.
+        step_return = (
+            (total_value - previous_total_value) / previous_total_value
+            if previous_total_value != 0
+            else 0.0
+        )
+        step_returns.append(step_return)
+
         print(
             f"Debug: market price={state.price:.2f}, "
             f"action price={proposed_action.price:.2f}, "
             f"cash={portfolio.cash:.2f}"
         )
 
-        # Print a label before showing the mutated account state.
         print("Updated Portfolio:")
         print_portfolio(portfolio)
         print(f"Total Portfolio Value: {total_value:.2f}")
+        print(f"Step Return: {step_return * 100:.2f}%")
         print("-" * 50)
 
-    # Announce that the simulation finished all market ticks.
+        previous_total_value = total_value
+
     print("=== Simulation Complete ===")
 
     print("\nPortfolio Value Over Time:")
-    for i, value in enumerate(portfolio_values):
-        print(f"Step {i + 1}: {value:.2f}")
+    for i, value in enumerate(portfolio_values, start=1):
+        print(f"Step {i}: {value:.2f}")
 
-    # Print summary performance metrics for analysis.
     print_summary_metrics(portfolio)
+    save_all_plots()
 
-    # Save a chart showing how the portfolio value evolved.
-    plot_portfolio_value()
-
-    # Run adversarial scenario testing after the main simulation.
     print("\n=== Running Adversarial Tests ===")
     results = run_all_scenarios()
 
@@ -210,6 +311,5 @@ def main() -> None:
         print(f"{scenario}: {data}")
 
 
-# Standard Python entry-point guard so the script only auto-runs when executed.
 if __name__ == "__main__":
     main()
