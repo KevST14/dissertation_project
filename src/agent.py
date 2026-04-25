@@ -1,61 +1,52 @@
-"""Simple trading policy used in the simulation.
-
-The logic here is intentionally basic: buy below one threshold, sell above
-another threshold, otherwise hold. That makes the decision path easy to follow.
-"""
-
-# Import the shared types used in the decision method signature and return value.
+from typing import Optional
 from models import MarketState, Portfolio, TradeAction
 
 
-# `SimpleTradingAgent` groups the trading rules behind a single interface.
 class SimpleTradingAgent:
-    # `decide` consumes the latest market tick plus the current portfolio state.
-    # It returns a `TradeAction` describing what the agent wants to do next.
-    def decide(self, state: MarketState, portfolio: Portfolio) -> TradeAction:
-        # Read the current share count for this symbol so sell decisions are safe.
-        holdings = portfolio.get_position(state.symbol)
+    """
+    A basic rule-based trading agent for baseline testing.
+    """
+    def __init__(self) -> None:
+        self.last_price: Optional[float] = None
 
-        # Buy when the price is cheap enough and the account can afford one share.
-        if state.price < 100 and portfolio.cash >= state.price:
+    def decide(self, market_state: MarketState, portfolio: Portfolio) -> TradeAction:
+        symbol = market_state.symbol
+        price = market_state.price
+
+        if self.last_price is None:
+            self.last_price = price
             return TradeAction(
-                # `BUY` tells downstream components this action increases exposure.
+                action_type="HOLD",
+                symbol=symbol,
+                quantity=0,
+                price=price,
+                reasoning="No previous price available, so hold."
+            )
+
+        if price <= self.last_price * 0.98:
+            action = TradeAction(
                 action_type="BUY",
-                # Reuse the symbol from the incoming market tick.
-                symbol=state.symbol,
-                # Trade a single share to keep the simulation easy to reason about.
+                symbol=symbol,
                 quantity=1,
-                # Preserve the current market price so execution uses the same value.
-                price=state.price,
-                # Include a readable explanation for the console log.
-                reasoning="Price is below the buy threshold and cash is available.",
+                price=price,
+                reasoning="Price dropped by at least 2%, buying 1 share."
             )
-
-        # Sell when the price is high enough and we actually own the asset.
-        if state.price > 105 and holdings > 0:
-            return TradeAction(
-                # `SELL` tells the broker to reduce the current position.
+        elif price >= self.last_price * 1.03 and portfolio.get_position(symbol) > 0:
+            action = TradeAction(
                 action_type="SELL",
-                # Sell the same symbol we just evaluated.
-                symbol=state.symbol,
-                # Again use one share so state transitions stay obvious.
+                symbol=symbol,
                 quantity=1,
-                # Preserve the current market price so execution uses the same value.
-                price=state.price,
-                # Explain why the sell branch fired.
-                reasoning="Price is above the sell threshold and inventory is available.",
+                price=price,
+                reasoning="Price rose by at least 3%, selling 1 share."
+            )
+        else:
+            action = TradeAction(
+                action_type="HOLD",
+                symbol=symbol,
+                quantity=0,
+                price=price,
+                reasoning="No trading condition met, so hold."
             )
 
-        # If neither threshold fires, the agent explicitly does nothing.
-        return TradeAction(
-            # `HOLD` makes the no-op decision explicit for safety and logging.
-            action_type="HOLD",
-            # Keep the same symbol for consistent reporting.
-            symbol=state.symbol,
-            # Zero quantity reflects that no order should be sent.
-            quantity=0,
-            # Keep the current market price attached for debugging and traceability.
-            price=state.price,
-            # State plainly that no rule produced a trade signal.
-            reasoning="No trade signal met the current thresholds.",
-        )
+        self.last_price = price
+        return action

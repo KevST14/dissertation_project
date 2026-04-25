@@ -1,102 +1,90 @@
 """Core data structures shared across the trading simulation.
 
-This module keeps the data model in one place so the other files can agree on
-what a market tick, a portfolio snapshot, a proposed trade, and a safety
-decision look like.
+This module defines the common data models used across the system so all
+components (agent, broker, safety layer, etc.) operate on consistent structures.
 """
 
-# `dataclass` reduces boilerplate for classes that mostly store data.
-# `field` is used to give mutable attributes a safe default factory.
+# `dataclass` reduces boilerplate for data containers.
+# `field` is used for safe defaults on mutable types like dict and list.
 from dataclasses import dataclass, field
+# Typing improves clarity and helps with static analysis.
+from typing import Dict, List, Optional
 
 
-# `MarketState` represents one point-in-time view of the market.
-# The agent consumes these records one by one during the simulation loop.
-@dataclass(frozen=True)
+# `MarketState` represents a single market observation at a point in time.
+@dataclass
 class MarketState:
-    # `timestamp` tells us when this market observation happened.
-    timestamp: str
-    # `symbol` identifies which asset the price belongs to.
+    # `symbol` identifies the asset (e.g., AAPL, BTC).
     symbol: str
     # `price` is the observed market price for this tick.
     price: float
+    # `timestamp` indicates when this data point occurred.
+    timestamp: str
 
 
-# `Portfolio` tracks the account state that changes as trades are executed.
+# `Portfolio` represents the evolving account state during the simulation.
 @dataclass
 class Portfolio:
-    # `cash` is the uninvested balance available for future buys.
+    # `cash` is the available balance not currently invested.
     cash: float
-    # `holdings` maps each symbol to the number of shares currently owned.
-    # `default_factory=dict` avoids sharing the same dictionary across instances.
-    holdings: dict[str, int] = field(default_factory=dict)
-    # `transactions` stores a simple audit trail of executed trades.
-    transactions: list[dict[str, str | int | float]] = field(default_factory=list)
+    # `holdings` maps symbols to share quantities.
+    holdings: Dict[str, int] = field(default_factory=dict)
+    # `transaction_history` logs executed trades for traceability.
+    transaction_history: List[dict] = field(default_factory=list)
 
-    # `get_position` centralizes how the rest of the code reads a holding.
-    # Returning `0` for missing symbols keeps callers simple.
+    # Returns the number of shares held for a given symbol.
     def get_position(self, symbol: str) -> int:
-        # `dict.get(..., 0)` means "return the share count if present, else 0."
         return self.holdings.get(symbol, 0)
 
-    # `update_position` applies a share delta after a buy or sell.
-    # Keeping the rule here prevents each caller from duplicating portfolio logic.
+    # Updates the position after a trade is executed.
     def update_position(self, symbol: str, quantity_change: int) -> None:
-        # Read the current position first so we can calculate the new total.
-        current_quantity = self.get_position(symbol)
-        # Add the requested change to the existing number of shares.
-        new_quantity = current_quantity + quantity_change
+        current = self.get_position(symbol)
+        new_quantity = current + quantity_change
 
-        # Negative positions are not allowed in this simple simulation.
+        # Prevent invalid negative holdings.
         if new_quantity < 0:
             raise ValueError(f"Cannot have negative holdings for {symbol}.")
 
-        # Removing zero-share positions keeps the holdings dictionary clean.
+        # Remove symbol if position becomes zero to keep data clean.
         if new_quantity == 0:
             self.holdings.pop(symbol, None)
         else:
-            # Any positive result is stored back into the holdings map.
             self.holdings[symbol] = new_quantity
 
-    # `record_transaction` appends one executed trade to the audit log.
-    def record_transaction(self, transaction: dict[str, str | int | float]) -> None:
-        # Store a shallow copy so later callers do not mutate the saved record.
-        self.transactions.append(dict(transaction))
+    # Records a transaction for audit/debug purposes.
+    def record_transaction(self, transaction: dict) -> None:
+        self.transaction_history.append(transaction)
 
-    # `get_total_value` combines cash with the marked-to-market value of holdings.
-    def get_total_value(self, current_prices: dict[str, float]) -> float:
-        # Start with the cash balance because it already contributes to total value.
-        total_value = self.cash
-
-        # Add each position valued at the latest provided market price.
-        for symbol, quantity in self.holdings.items():
-            total_value += quantity * current_prices.get(symbol, 0.0)
-
-        # Return the combined portfolio valuation.
-        return total_value
+    # Computes total portfolio value (cash + value of holdings).
+    def get_total_value(self, current_prices: Dict[str, float]) -> float:
+        holdings_value = sum(
+            quantity * current_prices.get(symbol, 0.0)
+            for symbol, quantity in self.holdings.items()
+        )
+        return self.cash + holdings_value
 
 
-# `TradeAction` is the agent's proposed next step.
-@dataclass(frozen=True)
+# `TradeAction` represents a decision made by the agent.
+@dataclass
 class TradeAction:
-    # `action_type` is expected to be `BUY`, `SELL`, or `HOLD`.
+    # `action_type` should be BUY, SELL, or HOLD.
     action_type: str
-    # `symbol` identifies which asset the action targets.
+    # `symbol` is the asset being traded.
     symbol: str
-    # `quantity` is the number of shares to trade.
+    # `quantity` is the number of shares involved.
     quantity: int
-    # `price` is the execution price proposed by the agent from the market tick.
+    # `price` is the execution or intended trade price.
     price: float
-    # `reasoning` stores a human-readable explanation for logging.
-    reasoning: str
+    # `reasoning` is an optional explanation from the agent.
+    reasoning: Optional[str] = None
 
 
-# `SafetyCheckResult` captures whether a trade passed the guardrails.
-@dataclass(frozen=True)
-class SafetyCheckResult:
-    # `approved` is `True` when the broker is allowed to execute the trade.
+# `SafetyDecision` captures the result of safety validation.
+@dataclass
+class SafetyDecision:
+    # `approved` indicates whether the trade can proceed.
     approved: bool
-    # `layer` identifies which safety component produced the decision.
-    layer: str
-    # `reason` explains why the action was approved or blocked.
+    # `reason` explains why the decision was made.
     reason: str
+    # `layer` identifies which safety rule or component made the decision.
+    layer: str

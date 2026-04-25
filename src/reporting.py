@@ -1,20 +1,10 @@
-"""Reporting, metrics, export, and plotting utilities for the project."""
-
+from pathlib import Path
 from collections import Counter
 import csv
 import math
-from pathlib import Path
 from typing import Any
 
 import matplotlib.pyplot as plt
-
-from models import Portfolio
-
-
-def print_portfolio(portfolio: Portfolio) -> None:
-    """Print portfolio state in a consistent terminal format."""
-    print(f"Cash: {portfolio.cash:.2f}")
-    print(f"Holdings: {portfolio.holdings}")
 
 
 def compute_max_drawdown(values: list[float]) -> float:
@@ -40,7 +30,7 @@ def compute_volatility(returns: list[float]) -> float:
         return 0.0
 
     mean_return = sum(returns) / len(returns)
-    variance = sum((value - mean_return) ** 2 for value in returns) / len(returns)
+    variance = sum((r - mean_return) ** 2 for r in returns) / len(returns)
     return math.sqrt(variance) * 100
 
 
@@ -80,7 +70,7 @@ def compute_drawdown_series(values: list[float]) -> list[float]:
 
 
 def count_profitable_and_losing_trades(
-    transaction_history: list[dict[str, Any]],
+    transaction_history: list[dict[str, Any]]
 ) -> tuple[int, int]:
     """Estimate profitable and losing sell trades using average cost basis."""
     avg_cost: dict[str, float] = {}
@@ -88,11 +78,11 @@ def count_profitable_and_losing_trades(
     profitable = 0
     losing = 0
 
-    for transaction in transaction_history:
-        action = transaction.get("action_type") or transaction.get("type")
-        symbol = transaction.get("symbol")
-        quantity = int(transaction.get("quantity", 0))
-        price = float(transaction.get("price", 0.0))
+    for tx in transaction_history:
+        action = tx.get("action_type") or tx.get("type")
+        symbol = tx.get("symbol")
+        quantity = int(tx.get("quantity", 0))
+        price = float(tx.get("price", 0.0))
 
         if not symbol or quantity <= 0:
             continue
@@ -101,15 +91,19 @@ def count_profitable_and_losing_trades(
             current_qty = position_sizes.get(symbol, 0)
             current_cost = avg_cost.get(symbol, 0.0) * current_qty
             new_total_qty = current_qty + quantity
+
             if new_total_qty > 0:
                 avg_cost[symbol] = (current_cost + price * quantity) / new_total_qty
+
             position_sizes[symbol] = new_total_qty
+
         elif action == "SELL":
             current_qty = position_sizes.get(symbol, 0)
             if current_qty <= 0:
                 continue
 
             cost_basis = avg_cost.get(symbol, 0.0)
+
             if price > cost_basis:
                 profitable += 1
             elif price < cost_basis:
@@ -139,11 +133,21 @@ def build_metrics_summary(
     final_value = values[-1]
     absolute_return = final_value - initial_value
     percentage_return = (absolute_return / initial_value) * 100 if initial_value != 0 else 0.0
+
     profitable_trades, losing_trades = count_profitable_and_losing_trades(transaction_history)
     total_sell_evaluations = profitable_trades + losing_trades
     win_rate = (
         (profitable_trades / total_sell_evaluations) * 100
         if total_sell_evaluations > 0
+        else 0.0
+    )
+
+    approved_actions = safety_counter.get("APPROVED", 0) if safety_counter else 0
+    blocked_actions = safety_counter.get("BLOCKED", 0) if safety_counter else 0
+    total_safety_events = approved_actions + blocked_actions
+    intervention_rate = (
+        (blocked_actions / total_safety_events) * 100
+        if total_safety_events > 0
         else 0.0
     )
 
@@ -162,8 +166,9 @@ def build_metrics_summary(
         "buy_decisions": action_counter.get("BUY", 0) if action_counter else 0,
         "sell_decisions": action_counter.get("SELL", 0) if action_counter else 0,
         "hold_decisions": action_counter.get("HOLD", 0) if action_counter else 0,
-        "approved_actions": safety_counter.get("APPROVED", 0) if safety_counter else 0,
-        "blocked_actions": safety_counter.get("BLOCKED", 0) if safety_counter else 0,
+        "approved_actions": approved_actions,
+        "blocked_actions": blocked_actions,
+        "safety_intervention_rate_pct": round(intervention_rate, 4),
         "profitable_sell_trades": profitable_trades,
         "losing_sell_trades": losing_trades,
         "win_rate_pct": round(win_rate, 4),
@@ -201,6 +206,7 @@ def print_summary_metrics(metrics: dict[str, Any]) -> None:
     print("\n=== Safety Summary ===")
     print(f"Approved actions: {metrics['approved_actions']}")
     print(f"Blocked actions: {metrics['blocked_actions']}")
+    print(f"Safety intervention rate: {metrics['safety_intervention_rate_pct']:.2f}%")
 
 
 def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -216,7 +222,6 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 
 
 def save_portfolio_value_plot(
-    *,
     output_dir: Path,
     timestamps: list[str],
     values: list[float],
@@ -237,7 +242,6 @@ def save_portfolio_value_plot(
 
 
 def save_cumulative_return_plot(
-    *,
     output_dir: Path,
     timestamps: list[str],
     values: list[float],
@@ -259,7 +263,6 @@ def save_cumulative_return_plot(
 
 
 def save_drawdown_plot(
-    *,
     output_dir: Path,
     timestamps: list[str],
     values: list[float],
@@ -280,14 +283,18 @@ def save_drawdown_plot(
     plt.close()
 
 
-def save_step_returns_plot(*, output_dir: Path, returns: list[float]) -> None:
+def save_step_returns_plot(
+    output_dir: Path,
+    returns: list[float],
+) -> None:
     """Save step returns plot."""
     if not returns:
         return
 
     step_labels = list(range(1, len(returns) + 1))
+
     plt.figure(figsize=(11, 5))
-    plt.plot(step_labels, [value * 100 for value in returns], marker="o")
+    plt.plot(step_labels, [r * 100 for r in returns], marker="o")
     plt.title("Step Returns Over Time")
     plt.xlabel("Step")
     plt.ylabel("Return (%)")
@@ -297,7 +304,6 @@ def save_step_returns_plot(*, output_dir: Path, returns: list[float]) -> None:
 
 
 def save_action_distribution_plot(
-    *,
     output_dir: Path,
     action_counts: Counter[str],
 ) -> None:
@@ -307,6 +313,7 @@ def save_action_distribution_plot(
 
     labels = list(action_counts.keys())
     values = list(action_counts.values())
+
     plt.figure(figsize=(8, 5))
     plt.bar(labels, values)
     plt.title("Agent Action Distribution")
@@ -318,7 +325,6 @@ def save_action_distribution_plot(
 
 
 def save_safety_outcomes_plot(
-    *,
     output_dir: Path,
     safety_counts: Counter[str],
 ) -> None:
@@ -328,6 +334,7 @@ def save_safety_outcomes_plot(
 
     labels = list(safety_counts.keys())
     values = list(safety_counts.values())
+
     plt.figure(figsize=(8, 5))
     plt.bar(labels, values)
     plt.title("Safety Outcomes")
@@ -339,7 +346,6 @@ def save_safety_outcomes_plot(
 
 
 def save_blocked_by_layer_plot(
-    *,
     output_dir: Path,
     blocked_by_layer_counts: Counter[str],
 ) -> None:
@@ -349,6 +355,7 @@ def save_blocked_by_layer_plot(
 
     labels = list(blocked_by_layer_counts.keys())
     values = list(blocked_by_layer_counts.values())
+
     plt.figure(figsize=(10, 5))
     plt.bar(labels, values)
     plt.title("Blocked Trades by Safety Layer")
@@ -360,7 +367,6 @@ def save_blocked_by_layer_plot(
 
 
 def save_strategy_comparison_plot(
-    *,
     comparison_rows: list[dict[str, Any]],
     output_dir: Path,
 ) -> None:
@@ -370,6 +376,7 @@ def save_strategy_comparison_plot(
 
     labels = [row["strategy"] for row in comparison_rows]
     values = [row.get("final_portfolio_value", 0.0) for row in comparison_rows]
+
     plt.figure(figsize=(10, 5))
     plt.bar(labels, values)
     plt.title("Final Portfolio Value by Strategy")
@@ -381,7 +388,6 @@ def save_strategy_comparison_plot(
 
 
 def save_return_comparison_plot(
-    *,
     comparison_rows: list[dict[str, Any]],
     output_dir: Path,
 ) -> None:
@@ -391,6 +397,7 @@ def save_return_comparison_plot(
 
     labels = [row["strategy"] for row in comparison_rows]
     values = [row.get("percentage_return_pct", 0.0) for row in comparison_rows]
+
     plt.figure(figsize=(10, 5))
     plt.bar(labels, values)
     plt.title("Percentage Return by Strategy")
@@ -401,27 +408,60 @@ def save_return_comparison_plot(
     plt.close()
 
 
+def save_scenario_block_rate_plot(
+    scenario_summary_rows: list[dict[str, Any]],
+    output_dir: Path,
+) -> None:
+    """Save blocked action rate by adversarial scenario."""
+    if not scenario_summary_rows:
+        return
+
+    labels = [row["scenario"] for row in scenario_summary_rows]
+    values = [row["block_rate_pct"] for row in scenario_summary_rows]
+
+    plt.figure(figsize=(10, 5))
+    plt.bar(labels, values)
+    plt.title("Blocked Action Rate by Adversarial Scenario")
+    plt.xlabel("Scenario")
+    plt.ylabel("Blocked Actions (%)")
+    plt.tight_layout()
+    plt.savefig(output_dir / "scenario_block_rate.png")
+    plt.close()
+
+
 def export_main_outputs(
     *,
     output_dir: Path,
     metrics: dict[str, Any],
     scenario_results: dict[str, Any],
     comparison_rows: list[dict[str, Any]],
-    portfolio: Portfolio,
+    dissertation_rows: list[dict[str, Any]],
+    scenario_summary_rows: list[dict[str, Any]],
+    blocked_layer_rows: list[dict[str, Any]],
+    portfolio_transaction_history: list[dict[str, Any]],
     simulation_log: list[dict[str, Any]],
 ) -> None:
     """Export CSV files for the main simulation and evaluations."""
     if simulation_log:
         write_csv(output_dir / "simulation_log.csv", simulation_log)
 
-    if portfolio.transaction_history:
-        write_csv(output_dir / "transactions.csv", portfolio.transaction_history)
+    if portfolio_transaction_history:
+        write_csv(output_dir / "transactions.csv", portfolio_transaction_history)
 
     if metrics:
         write_csv(output_dir / "metrics_summary.csv", [metrics])
 
     if comparison_rows:
         write_csv(output_dir / "strategy_comparison.csv", comparison_rows)
+
+    if dissertation_rows:
+        write_csv(output_dir / "dissertation_results_table.csv", dissertation_rows)
+
+    if scenario_summary_rows:
+        write_csv(output_dir / "scenario_summary.csv", scenario_summary_rows)
+
+    if blocked_layer_rows:
+        write_csv(output_dir / "blocked_layer_summary.csv", blocked_layer_rows)
 
     scenario_rows: list[dict[str, Any]] = []
     for scenario_name, data in scenario_results.items():
@@ -443,7 +483,10 @@ def print_output_manifest(output_dir: Path) -> None:
     print(output_dir / "transactions.csv")
     print(output_dir / "metrics_summary.csv")
     print(output_dir / "strategy_comparison.csv")
+    print(output_dir / "dissertation_results_table.csv")
     print(output_dir / "scenario_results.csv")
+    print(output_dir / "scenario_summary.csv")
+    print(output_dir / "blocked_layer_summary.csv")
     print(output_dir / "portfolio_value.png")
     print(output_dir / "cumulative_return.png")
     print(output_dir / "drawdown.png")
@@ -453,3 +496,4 @@ def print_output_manifest(output_dir: Path) -> None:
     print(output_dir / "blocked_by_layer.png")
     print(output_dir / "strategy_comparison.png")
     print(output_dir / "return_comparison.png")
+    print(output_dir / "scenario_block_rate.png")
