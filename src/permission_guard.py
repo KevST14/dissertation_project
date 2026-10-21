@@ -1,24 +1,20 @@
-from models import Portfolio, SafetyCheckResult, TradeAction
+from models import SafetyDecision, TradeAction
 
 
 class PermissionGuard:
-    """Checks whether the requested action type is permitted."""
+    """
+    Restricts which action types are permitted at runtime.
+    """
 
-    def __init__(self, allowed_actions: set[str]) -> None:
-        self.allowed_actions = allowed_actions
+    def __init__(self, allowed_actions: set[str] | None = None) -> None:
+        self.allowed_actions = allowed_actions or {"BUY", "SELL", "HOLD"}
 
-    def validate(self, action: TradeAction, portfolio: Portfolio) -> SafetyCheckResult:
-        del portfolio
-
+    def check(self, action: TradeAction) -> SafetyDecision:
         if action.action_type not in self.allowed_actions:
-            return SafetyCheckResult(
-                approved=False,
-                layer="permission_guard",
-                reason=f"Action type {action.action_type} is not permitted.",
+            return SafetyDecision(
+                False,
+                f"Action type '{action.action_type}' is not permitted.",
+                "PermissionGuard"
             )
 
-        return SafetyCheckResult(
-            approved=True,
-            layer="permission_guard",
-            reason="Action is permitted.",
-        )
+        return SafetyDecision(True, "Permission check passed.", "PermissionGuard")

@@ -1,20 +1,17 @@
-"""Benchmark strategies used for comparison against the safety-enabled system."""
-
 from collections import Counter
-from typing import Any
 
+from models import Portfolio, TradeAction
+from market import get_mock_market_data
 from agent import SimpleTradingAgent
 from broker import MockBroker
-from market import get_mock_market_data
-from models import Portfolio, TradeAction
 from reporting import build_metrics_summary
 
 
-def run_buy_and_hold_benchmark(initial_cash: float = 1000.0) -> dict[str, Any]:
-    """Run a simple buy-and-hold benchmark."""
+def run_buy_and_hold_benchmark(initial_cash: float = 1000.0) -> dict:
     market_data = get_mock_market_data()
     portfolio = Portfolio(cash=initial_cash)
     broker = MockBroker()
+
     values: list[float] = []
     returns: list[float] = []
     previous_total_value = initial_cash
@@ -36,7 +33,7 @@ def run_buy_and_hold_benchmark(initial_cash: float = 1000.0) -> dict[str, Any]:
             symbol=first_state.symbol,
             quantity=quantity,
             price=first_state.price,
-            reasoning="Buy-and-hold baseline purchase.",
+            reasoning="Buy-and-hold baseline purchase."
         )
         broker.execute_trade(buy_action, portfolio)
 
@@ -63,15 +60,15 @@ def run_buy_and_hold_benchmark(initial_cash: float = 1000.0) -> dict[str, Any]:
     )
 
 
-def run_no_safety_benchmark(initial_cash: float = 1000.0) -> dict[str, Any]:
-    """Run the agent without safety validation for comparison."""
+def run_no_safety_benchmark(initial_cash: float = 1000.0) -> dict:
     market_data = get_mock_market_data()
     portfolio = Portfolio(cash=initial_cash)
     agent = SimpleTradingAgent()
     broker = MockBroker()
+
     values: list[float] = []
     returns: list[float] = []
-    actions: Counter[str] = Counter()
+    actions = Counter()
     previous_total_value = initial_cash
 
     for state in market_data:
